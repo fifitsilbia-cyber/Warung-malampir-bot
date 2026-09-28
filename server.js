@@ -180,6 +180,18 @@ app.post('/webhook', async (req, res) => {
     return res.sendStatus(200);
   }
 
+  // Pesanan dari halaman menu -> teruskan ke dapur
+  if (/^PESAN\s*\n\s*Nama:/i.test(pesanMasuk)) {
+    if (!loadData().toko.buka) {
+      await kirimWA(sender, 'Maaf, warung sedang tutup. Silakan pesan lagi saat jam buka ya 🙏');
+      return res.sendStatus(200);
+    }
+    const isi = pesanMasuk.replace(/^PESAN\s*/i, '');
+    await kirimWA(process.env.DAPUR_NUMBER, `🛎️ PESANAN BARU\nDari: ${sender}\n${isi}`);
+    await kirimWA(sender, 'Pesananmu sudah kami terima, ditunggu ya 🙏');
+    return res.sendStatus(200);
+  }
+
   // Cek dulu apakah ini perintah admin
   const adminKeywords = ['BUKA', 'TUTUP', 'STOK', 'STATUS', 'PANEL'];
   const kataPertama = pesanMasuk.trim().split(/\s+/)[0].toUpperCase();
