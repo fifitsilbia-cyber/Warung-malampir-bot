@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#4a0709">
+<title>Dapur Malampir</title>
+<style>
+:root{--bg:#4a0709;--card:#5e0c10;--line:#8a2a2e;--tx:#fff;--mut:#e3b9b6;--gold:#e0bd73}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,sans-serif;padding:20px 16px 40px}
+main{max-width:520px;margin:0 auto}
+h1{font:700 26px Georgia,serif;margin:0 0 14px}
+h2{font:600 20px Georgia,serif;color:var(--gold);margin:24px 0 8px}
+input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--tx);font:inherit}
+button{font:inherit;cursor:pointer}
+#toko{width:100%;padding:20px;border:0;border-radius:12px;font-weight:700;font-size:22px;margin-top:12px}
+#toko.buka{background:#2f8f4e;color:#fff}
+#toko.tutup{background:#b3261e;color:#fff}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.row button{min-width:104px;padding:10px;border-radius:8px;border:0;font-weight:700}
+.ada{background:#2f8f4e;color:#fff}
+.habis{background:#b3261e;color:#fff}
+select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--tx);font:inherit}
+.form{display:grid;gap:8px;grid-template-columns:1fr 1fr}
+.form .full{grid-column:1/-1}
+.add{background:var(--gold);color:var(--bg);border:0;border-radius:10px;padding:12px;font-weight:700}
+.row{flex-wrap:wrap}
+.row .nm{flex:1 1 100%}
+.row .acts{display:flex;gap:6px;flex:1 1 100%}
+.row .acts button{flex:1;min-width:0;padding:9px 6px}
+.row .sec{background:none;border:1px solid var(--gold);color:var(--gold)}
+#msg{min-height:22px;color:var(--mut);font-size:14px;margin:10px 0 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Dapur Malampir</h1>
+  <input type="password" id="pin" placeholder="PIN dapur" autocomplete="current-password" inputmode="numeric">
+  <button id="toko" class="tutup">Memuat…</button>
+  <p id="msg"></p>
+  <h2>Stok &amp; daftar menu</h2>
+  <div id="menu"></div>
+  <h2>Tambah menu baru</h2>
+  <div class="form">
+    <input class="full" id="nn" placeholder="Nama menu, contoh: Bakso aci">
+    <input id="nh" placeholder="Harga (angka)" inputmode="numeric">
+    <input id="ne" placeholder="Emoji (boleh kosong)">
+    <select class="full" id="ng"><option value="topping">Topping</option><option value="minuman">Minuman</option><option value="paket">Paket</option></select>
+    <button class="add full" id="tambah">Tambah menu</button>
+  </div>
+</main>
+<script>
+// Isi dengan alamat server Railway (tanpa garis miring di akhir)
+var API_URL = "https://warung-malampir-bot-production-3b6a.up.railway.app";
+var st = {open:false, habis:[], menu:{paket:[],topping:[],minuman:[]}};
+var LABEL = {paket:"Paket", topping:"Topping", minuman:"Minuman"};
+var $ = function(id){return document.getElementById(id)};
+function msg(t){ $("msg").textContent = t; }
+try{ $("pin").value = localStorage.getItem("pin") || ""; }catch(e){}
+function rp(n){ return "Rp" + Number(n).toLocaleString("id-ID"); }
+function salin(m){ return JSON.parse(JSON.stringify(m)); }
+
+function draw(){
+  var t = $("toko");
+  t.className = st.open ? "buka" : "tutup";
+  t.textContent = st.open ? "Toko BUKA (ketuk untuk tutup)" : "Toko TUTUP (ketuk untuk buka)";
+  var box = $("menu"); box.innerHTML = "";
+  ["paket","topping","minuman"].forEach(function(g){
+    var h2 = document.createElement("p"); h2.className = "hint"; h2.style.color = "#e3b9b6";
+    h2.textContent = LABEL[g]; box.appendChild(h2);
+    st.menu[g].forEach(function(it, i){
+      var hb = st.habis.indexOf(it.n) > -1;
+      var r = document.createElement("div"); r.className = "row";
+      var s = document.createElement("span"); s.className = "nm";
+      s.textContent = (it.e ? it.e + " " : "") + it.n + " - " + rp(it.h);
+      var acts = document.createElement("div"); acts.className = "acts";
+      var b1 = document.createElement("button"); b1.className = hb ? "habis" : "ada"; b1.textContent = hb ? "Habis" : "Tersedia";
+      b1.onclick = function(){
+        save({habis: hb ? st.habis.filter(function(x){return x !== it.n}) : st.habis.concat([it.n])});
+      };
+      var b2 = document.createElement("button"); b2.className = "sec"; b2.textContent = "Harga";
+      b2.onclick = function(){
+        var v = prompt("Harga baru untuk " + it.n + " (angka saja):", it.h);
+        if(v === null) return;
+        var n = parseInt(v.replace(/\D/g, ""), 10);
+        if(isNaN(n)){ msg("Harga harus angka."); return; }
+        var m = salin(st.menu); m[g][i].h = n; save({menu: m});
+      };
+      var b3 = document.createElement("button"); b3.className = "sec"; b3.textContent = "Hapus";
+      b3.onclick = function(){
+        if(!confirm("Hapus menu " + it.n + "?")) return;
+        var m = salin(st.menu); m[g].splice(i, 1);
+        save({menu: m, habis: st.habis.filter(function(x){return x !== it.n})});
+      };
+      [b1, b2, b3].forEach(function(b){ acts.appendChild(b); });
+      r.appendChild(s); r.appendChild(acts); box.appendChild(r);
+    });
+  });
+}
+function ambil(s){ st = {open:!!s.open, habis:s.habis||[], menu:s.menu||st.menu}; draw(); }
+function load(){
+  fetch(API_URL + "/status", {cache:"no-store"}).then(function(r){return r.json()})
+    .then(ambil).catch(function(){ msg("Tidak bisa terhubung ke server."); });
+}
+function save(patch){
+  var body = Object.assign({pin: $("pin").value.trim()}, patch);
+  msg("Menyimpan…");
+  fetch(API_URL + "/status", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)})
+    .then(function(r){ if(r.status === 401) throw "pin"; if(!r.ok) throw "x"; return r.json(); })
+    .then(function(s){
+      ambil(s); msg("Tersimpan.");
+      try{ localStorage.setItem("pin", $("pin").value.trim()); }catch(e){}
+    })
+    .catch(function(e){ msg(e === "pin" ? "PIN salah." : "Gagal menyimpan, coba lagi."); });
+}
+$("toko").onclick = function(){ save({open: !st.open}); };
+$("tambah").onclick = function(){
+  var n = $("nn").value.trim(), h = parseInt($("nh").value.replace(/\D/g, ""), 10), g = $("ng").value;
+  if(!n){ msg("Isi nama menu dulu."); return; }
+  if(isNaN(h)){ msg("Isi harga dengan angka."); return; }
+  var ada = ["paket","topping","minuman"].some(function(k){ return st.menu[k].some(function(x){ return x.n.toLowerCase() === n.toLowerCase(); }); });
+  if(ada){ msg("Nama menu itu sudah ada."); return; }
+  var m = salin(st.menu); m[g].push({n:n, h:h, e:$("ne").value.trim()});
+  save({menu: m});
+  $("nn").value = ""; $("nh").value = ""; $("ne").value = "";
+};
+draw(); load();
+</script>
+</body>
+</html>
