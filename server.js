@@ -1,231 +1,68 @@
-require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+// Warung Seblak Malampir - API status toko, stok & daftar menu (tanpa bot WA)
+// Variable Railway yang dipakai: ADMIN_PIN (PORT otomatis dari Railway)
+const http = require("http");
+const fs = require("fs");
 
-const app = express();
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+const PIN = process.env.ADMIN_PIN || "";
+const FILE = "/tmp/state.json";
+const DEF = {
+  paket: [{ n: "Paket Seblak", h: 10000, e: "🍜" }],
+  topping: [
+    { n: "Kerupuk", h: 1000, e: "🥨" }, { n: "Kwetiau", h: 1000, e: "🍝" }, { n: "Makaroni", h: 1000, e: "🍝" },
+    { n: "Mie", h: 1000, e: "🍜" }, { n: "Jamur enoki", h: 2000, e: "🍄" }, { n: "Ceker", h: 2000, e: "🍗" },
+    { n: "Tulang", h: 2000, e: "🦴" }, { n: "Sosis", h: 2000, e: "🌭" }, { n: "Baso", h: 2000, e: "🍡" },
+    { n: "Dumpling", h: 2000, e: "🥟" }, { n: "Chikuwa", h: 2000, e: "🍥" }, { n: "Kornet", h: 2000, e: "🥫" },
+    { n: "Otak-otak", h: 2000, e: "🐟" }, { n: "Telur", h: 3000, e: "🥚" }
+  ],
+  minuman: [{ n: "Es Teh Jumbo", h: 3000, e: "🧋" }, { n: "Jeruk Peras", h: 5000, e: "🍊" }]
+};
+let st = { open: false, habis: [], menu: DEF };
+try { Object.assign(st, JSON.parse(fs.readFileSync(FILE, "utf8"))); } catch (e) {}
 
-const PORT = process.env.PORT || 3000;
-const FONNTE_TOKEN = process.env.FONNTE_TOKEN;
-const ADMIN_PIN = process.env.ADMIN_PIN || '0000';
-const DATA_PATH = path.join(__dirname, 'data.json');
-
-// ---------- Helper: baca & simpan data.json ----------
-function loadData() {
-  return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
-}
-function saveData(data) {
-  fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
-}
-function formatRupiah(n) {
-  return 'Rp' + n.toLocaleString('id-ID');
-}
-
-// ---------- Helper: kirim balasan lewat Fonnte ----------
-async function kirimWA(target, message) {
-  try {
-    await axios.post(
-      'https://api.fonnte.com/send',
-      { target, message },
-      { headers: { Authorization: FONNTE_TOKEN } }
-    );
-  } catch (err) {
-    console.error('Gagal kirim WA:', err.response ? err.response.data : err.message);
-  }
-}
-
-// ---------- Susun teks menu ----------
-function teksMenu() {
-  const data = loadData();
-  let t = `*${data.toko.nama}*\n\n`;
-  t += `*${data.paket.nama}* - ${formatRupiah(data.paket.harga)}\n`;
-  t += `Isi: ${data.paket.isi.join(', ')}\n`;
-  t += data.paket.tersedia ? '' : '_(paket sedang habis)_\n';
-  t += `\n*Topping Tambahan:*\n`;
-  data.topping.forEach((tp) => {
-    t += `- ${tp.nama}: ${formatRupiah(tp.harga)}${tp.tersedia ? '' : ' (habis)'}\n`;
-  });
-  t += `\nSayur: gratis, pilih pakai atau tidak\n`;
-  t += `Level pedas: ${data.levelPedas.join(', ')}\n`;
-  t += `\n*Minuman:*\n`;
-  data.minuman.forEach((m) => {
-    t += `- ${m.nama}: ${formatRupiah(m.harga)}${m.tersedia ? '' : ' (habis)'}\n`;
-  });
-  return t;
-}
-
-function teksStatus() {
-  const data = loadData();
-  return data.toko.buka
-    ? `Toko *BUKA* ✅\nJam buka: ${data.toko.jamBuka}\nSilakan order sekarang!`
-    : `Toko *TUTUP* ❌\nJam buka: ${data.toko.jamBuka}\nSilakan order saat jam buka ya.`;
-}
-
-function teksCaraPesan() {
-  return (
-    `*Cara Pesan:*\n` +
-    `1. Balas chat ini dengan menu yang mau dipesan (paket + topping tambahan + level pedas + minuman kalau mau)\n` +
-    `2. Tunggu konfirmasi total harga dari kami\n` +
-    `3. Pesanan diambil lewat kurir Gojek / Grab / ShopeePay ke alamat Warung Seblak Malampir\n` +
-    `4. Bayar langsung ke kurir sesuai metode yang dipilih`
-  );
-}
-
-function teksMenuUtama() {
-  return (
-    `Halo, selamat datang di *Warung Seblak Malampir*! 🌶️\n\n` +
-    `Ketik angka pilihan:\n` +
-    `1. Lihat Menu\n` +
-    `2. Cek Buka/Tutup\n` +
-    `3. Cara Pesan\n` +
-    `4. Kritik & Saran`
-  );
-}
-
-function teksKritikSaran() {
-  const data = loadData();
-  return `Kritik & saran bisa dikirim ke nomor: ${data.toko.kritikSaran}\nTerima kasih! 🙏`;
-}
-
-// ---------- Perintah admin (BUKA/TUTUP/STOK/STATUS/PANEL) ----------
-async function prosesAdmin(pesan, sender) {
-  const parts = pesan.trim().split(/\s+/);
-  const perintah = parts[0].toUpperCase();
-  const pin = parts[parts.length - 1];
-
-  if (pin !== ADMIN_PIN) {
-    await kirimWA(sender, 'PIN salah.');
-    return true;
-  }
-
-  const data = loadData();
-
-  if (perintah === 'BUKA') {
-    data.toko.buka = true;
-    saveData(data);
-    await kirimWA(sender, 'Status toko diubah jadi BUKA ✅');
-    return true;
-  }
-
-  if (perintah === 'TUTUP') {
-    data.toko.buka = false;
-    saveData(data);
-    await kirimWA(sender, 'Status toko diubah jadi TUTUP ❌');
-    return true;
-  }
-
-  if (perintah === 'STATUS') {
-    await kirimWA(sender, teksStatus());
-    return true;
-  }
-
-  if (perintah === 'PANEL') {
-    await kirimWA(
-      sender,
-      `*Perintah Admin:*\nBUKA [PIN]\nTUTUP [PIN]\nSTATUS [PIN]\nSTOK [nama item] [ON/OFF] [PIN]\nPANEL [PIN]`
-    );
-    return true;
-  }
-
-  if (perintah === 'STOK') {
-    // format: STOK <nama item> <ON/OFF> <PIN>
-    if (parts.length < 4) {
-      await kirimWA(sender, 'Format salah. Contoh: STOK ceker OFF 1234');
-      return true;
+function cleanMenu(m) {
+  if (!m || typeof m !== "object") return null;
+  const out = {};
+  for (const g of ["paket", "topping", "minuman"]) {
+    if (!Array.isArray(m[g]) || m[g].length > 60) return null;
+    out[g] = [];
+    for (const it of m[g]) {
+      const h = Number(it && it.h);
+      if (!it || typeof it.n !== "string" || !it.n.trim() || it.n.length > 40 || !(h >= 0 && h <= 1000000)) return null;
+      out[g].push({ n: it.n.trim(), h: Math.round(h), e: typeof it.e === "string" ? it.e.slice(0, 8) : "" });
     }
-    const status = parts[parts.length - 2].toUpperCase();
-    const namaItem = parts.slice(1, parts.length - 2).join(' ').toLowerCase();
-    const tersedia = status === 'ON';
+  }
+  return out;
+}
 
-    let ditemukan = false;
-    if (data.paket.nama.toLowerCase().includes(namaItem)) {
-      data.paket.tersedia = tersedia;
-      ditemukan = true;
-    }
-    data.topping.forEach((tp) => {
-      if (tp.nama.toLowerCase() === namaItem) {
-        tp.tersedia = tersedia;
-        ditemukan = true;
+const H = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Content-Type": "application/json",
+  "Cache-Control": "no-store"
+};
+const send = (res, code, obj) => { res.writeHead(code, H); res.end(JSON.stringify(obj)); };
+
+http.createServer((req, res) => {
+  if (req.method === "OPTIONS") { res.writeHead(204, H); return res.end(); }
+  if (req.url.split("?")[0] !== "/status") return send(res, 404, {});
+  if (req.method === "GET") return send(res, 200, st);
+  if (req.method !== "POST") return send(res, 405, {});
+  let b = "";
+  req.on("data", c => { b += c; if (b.length > 40000) req.destroy(); });
+  req.on("end", () => {
+    try {
+      const d = JSON.parse(b);
+      if (!PIN || d.pin !== PIN) return send(res, 401, { error: "pin" });
+      if (typeof d.open === "boolean") st.open = d.open;
+      if (Array.isArray(d.habis)) st.habis = d.habis.filter(x => typeof x === "string").slice(0, 200);
+      if (d.menu !== undefined) {
+        const m = cleanMenu(d.menu);
+        if (!m) return send(res, 400, { error: "menu" });
+        st.menu = m;
       }
-    });
-    data.minuman.forEach((m) => {
-      if (m.nama.toLowerCase() === namaItem) {
-        m.tersedia = tersedia;
-        ditemukan = true;
-      }
-    });
-
-    if (ditemukan) {
-      saveData(data);
-      await kirimWA(sender, `Stok "${namaItem}" diubah jadi ${tersedia ? 'ADA' : 'HABIS'} ✅`);
-    } else {
-      await kirimWA(sender, `Item "${namaItem}" tidak ditemukan di data menu.`);
-    }
-    return true;
-  }
-
-  return false;
-}
-
-// ---------- Webhook utama dari Fonnte ----------
-app.post('/webhook', async (req, res) => {
-  const pesanMasuk = (req.body.message || '').trim();
-  const sender = req.body.sender || req.body.pengirim;
-
-  if (!pesanMasuk || !sender) {
-    return res.sendStatus(200);
-  }
-
-  // Pesanan dari halaman menu -> teruskan ke dapur
-  if (/^PESAN\s*\n\s*Nama:/i.test(pesanMasuk)) {
-    if (!loadData().toko.buka) {
-      await kirimWA(sender, 'Maaf, warung sedang tutup. Silakan pesan lagi saat jam buka ya 🙏');
-      return res.sendStatus(200);
-    }
-    const isi = pesanMasuk.replace(/^PESAN\s*/i, '');
-    await kirimWA(process.env.DAPUR_NUMBER, `🛎️ PESANAN BARU\nDari: ${sender}\n${isi}`);
-    await kirimWA(sender, 'Pesananmu sudah kami terima, ditunggu ya 🙏');
-    return res.sendStatus(200);
-  }
-
-  // Cek dulu apakah ini perintah admin
-  const adminKeywords = ['BUKA', 'TUTUP', 'STOK', 'STATUS', 'PANEL'];
-  const kataPertama = pesanMasuk.trim().split(/\s+/)[0].toUpperCase();
-
-  if (adminKeywords.includes(kataPertama)) {
-    const ditangani = await prosesAdmin(pesanMasuk, sender);
-    if (ditangani) return res.sendStatus(200);
-  }
-
-  // Menu customer
-  switch (pesanMasuk) {
-    case '1':
-      await kirimWA(sender, teksMenu());
-      break;
-    case '2':
-      await kirimWA(sender, teksStatus());
-      break;
-    case '3':
-      await kirimWA(sender, teksCaraPesan());
-      break;
-    case '4':
-      await kirimWA(sender, teksKritikSaran());
-      break;
-    default:
-      await kirimWA(sender, teksMenuUtama());
-  }
-
-  res.sendStatus(200);
-});
-
-app.get('/', (req, res) => {
-  res.send('Bot Warung Seblak Malampir aktif.');
-});
-
-app.listen(PORT, () => {
-  console.log(`Server jalan di port ${PORT}`);
-});
+      try { fs.writeFileSync(FILE, JSON.stringify(st)); } catch (e) {}
+      send(res, 200, st);
+    } catch (e) { send(res, 400, {}); }
+  });
+}).listen(process.env.PORT || 3000);
